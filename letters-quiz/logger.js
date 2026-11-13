@@ -92,9 +92,9 @@ function auth(req, res, next) {
   const pass = process.env.ADMIN_PASSWORD;
   if (!pass) return res.status(503).type("text/plain; charset=utf-8").send("صفحة السجل غير مفعّلة: أضف ADMIN_PASSWORD في إعدادات Render.");
   const h = req.headers.authorization || "";
-  const given = h.startsWith("Basic ") ? Buffer.from(h.slice(6), "base64").toString().split(":").slice(1).join(":") : "";
+  const given = req.headers["x-admin-pass"] ? decodeURIComponent(String(req.headers["x-admin-pass"])) : h.startsWith("Basic ") ? Buffer.from(h.slice(6), "base64").toString().split(":").slice(1).join(":") : "";
   if (given === pass) return next();
-  res.set("WWW-Authenticate", 'Basic realm="letters-quiz-admin", charset="UTF-8"').status(401).type("text/plain; charset=utf-8").send("كلمة المرور مطلوبة.");
+  res.status(401).type("text/plain; charset=utf-8").send("كلمة المرور مطلوبة.");
 }
 
 const KIND_AR = { visit: "زيارة الموقع", create: "إنشاء غرفة", join: "دخول لاعب", tv: "شاشة تلفاز", rejoin: "عودة بعد انقطاع", start: "بداية لعبة", final: "نهاية لعبة" };
@@ -125,12 +125,12 @@ th{position:sticky;top:0;background:var(--card);color:var(--mute);font-weight:60
 h2{font-size:17px;margin:20px 0 8px}.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px}
 .list{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 12px}.list div{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line)}.list div:last-child{border:0}
 </style></head><body>
-<h1>سجل مسابقة الحروف</h1><p class="sub" id="sub">جارٍ التحميل…</p>
+<div id="login" hidden style="max-width:360px;margin:40px auto" class="st"><h1>سجل مسابقة الحروف</h1><p class="sub">اكتب كلمة مرور صفحة السجل</p><form id="lf" class="bar"><input id="pw" type="password" autocomplete="current-password" style="flex:1"><button>دخول</button></form><p id="lerr" class="sub"></p></div><div id="app"><h1>سجل مسابقة الحروف</h1><p class="sub" id="sub">جارٍ التحميل…</p>
 <div class="stats" id="stats"></div>
 <div class="two"><div><h2>أكثر اللاعبين</h2><div class="list" id="topNames"></div></div><div><h2>المدن</h2><div class="list" id="topCities"></div></div><div><h2>الأجهزة</h2><div class="list" id="topDevices"></div></div></div>
 <h2>كل العمليات</h2>
-<div class="bar"><input id="q" placeholder="بحث: اسم، غرفة، IP، مدينة…"><select id="kind"><option value="">كل العمليات</option></select><button id="reload">تحديث</button><a class="btn" href="/admin/export.csv">تنزيل Excel</a></div>
-<div class="wrap"><table><thead><tr><th>الوقت</th><th>العملية</th><th>الاسم</th><th>الغرفة</th><th>IP</th><th>المدينة</th><th>الدولة</th><th>الجهاز</th><th>المتصفح</th><th>تفاصيل</th></tr></thead><tbody id="rows"></tbody></table></div>
+<div class="bar"><input id="q" placeholder="بحث: اسم، غرفة، IP، مدينة…"><select id="kind"><option value="">كل العمليات</option></select><button id="reload">تحديث</button><button id="dl">تنزيل Excel</button><button id="out" style="background:#888">خروج</button></div>
+<div class="wrap"><table><thead><tr><th>الوقت</th><th>العملية</th><th>الاسم</th><th>الغرفة</th><th>IP</th><th>المدينة</th><th>الدولة</th><th>الجهاز</th><th>المتصفح</th><th>تفاصيل</th></tr></thead><tbody id="rows"></tbody></table></div></div>
 <script>
 const K=${JSON.stringify(KIND_AR)};let all=[];
 const e=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -141,7 +141,13 @@ const det=r=>{const d=r.detail;if(!d)return"";if(d.winner)return"الفائز: "
 function draw(){const q=document.getElementById("q").value.trim().toLowerCase(),k=document.getElementById("kind").value;
  const rows=all.filter(r=>(!k||r.kind===k)&&(!q||[r.name,r.room,r.ip,r.city,r.country,r.device].join(" ").toLowerCase().includes(q)));
  document.getElementById("rows").innerHTML=rows.slice(0,1500).map(r=>"<tr><td>"+t(r.at)+"</td><td><span class=k>"+e(K[r.kind]||r.kind)+"</span></td><td>"+e(r.name)+"</td><td>"+e(r.room)+"</td><td>"+e(r.ip)+"</td><td>"+e(r.city)+"</td><td>"+e(r.country)+"</td><td>"+e(r.device)+"</td><td>"+e(r.browser)+"</td><td>"+e(det(r))+"</td></tr>").join("")||"<tr><td colspan=10>لا توجد عمليات</td></tr>"}
-async function load(){const r=await fetch("/admin/data.json",{cache:"no-store"});if(!r.ok){document.getElementById("sub").textContent="تعذّر تحميل السجل ("+r.status+") — أعد فتح الصفحة";return}const j=await r.json();all=j.rows||[];
+let PW="";try{PW=sessionStorage.getItem("lqpw")||""}catch(_){}
+const H=()=>({"x-admin-pass":encodeURIComponent(PW)});
+function showLogin(msg){document.getElementById("app").hidden=true;document.getElementById("login").hidden=false;document.getElementById("lerr").textContent=msg||"";document.getElementById("pw").focus()}
+document.getElementById("lf").onsubmit=ev=>{ev.preventDefault();PW=document.getElementById("pw").value;try{sessionStorage.setItem("lqpw",PW)}catch(_){}load()};
+document.getElementById("out").onclick=()=>{PW="";try{sessionStorage.removeItem("lqpw")}catch(_){}showLogin()};
+document.getElementById("dl").onclick=async()=>{const r=await fetch("/admin/export.csv",{headers:H(),cache:"no-store"});if(!r.ok)return showLogin("كلمة المرور غير صحيحة");const b=await r.blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="letters-quiz-log.csv";a.click()};
+async function load(){if(!PW)return showLogin();const r=await fetch("/admin/data.json",{cache:"no-store",headers:H()});if(r.status===401)return showLogin("كلمة المرور غير صحيحة");if(!r.ok){document.getElementById("sub").textContent="تعذّر تحميل السجل ("+r.status+")";return}document.getElementById("login").hidden=true;document.getElementById("app").hidden=false;const j=await r.json();all=j.rows||[];
  document.getElementById("sub").textContent=(j.persistent?"السجل محفوظ بشكل دائم":"تنبيه: السجل مؤقت (Supabase غير مربوط)")+" — آخر تحديث "+t(Date.now());
  const visitors=new Set(all.filter(r=>r.ip).map(r=>r.ip+"|"+r.device)).size;
  const names=new Set(all.filter(r=>r.kind==="join"||(r.kind==="create"&&r.name)).map(r=>r.name)).size;
@@ -157,7 +163,7 @@ const sel=document.getElementById("kind");Object.entries(K).forEach(([k,v])=>sel
 
 module.exports = function attachLogger({ app, io, rooms }) {
   app.set("trust proxy", true);
-  app.get("/admin", auth, (_, res) => res.type("html").send(ADMIN_HTML));
+  app.get("/admin", (_, res) => res.set("Cache-Control", "no-store").type("html").send(ADMIN_HTML));
   app.get("/admin/data.json", auth, async (_, res) => {
     try { res.json({ persistent: useDb, rows: await readAll() }); }
     catch (e) { res.json({ persistent: false, error: e.message, rows: memory }); }
