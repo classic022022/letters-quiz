@@ -328,6 +328,8 @@ app.get("/health", (_, res) => res.json({ ok: true, rooms: rooms.size, questions
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: false }, pingInterval: 10000, pingTimeout: 20000 });
 
+require("./logger")({ app, io, rooms });
+
 function attach(socket, room, data) {
   socket.data = { code: room.code, ...data };
   socket.join("r" + room.code);
