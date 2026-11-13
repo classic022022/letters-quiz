@@ -137,22 +137,22 @@ const e=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">
 const t=d=>new Date(d).toLocaleString("ar-SA-u-nu-latn",{timeZone:"Asia/Riyadh",dateStyle:"short",timeStyle:"short"});
 const top=(arr,f,n=8)=>{const m={};arr.forEach(r=>{const k=f(r);if(k)m[k]=(m[k]||0)+1});return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,n)};
 const list=(id,items)=>document.getElementById(id).innerHTML=items.length?items.map(([k,v])=>"<div><span>"+e(k)+"</span><b>"+v+"</b></div>").join(""):"<div><span>لا يوجد</span></div>";
-const det=r=>{const d=r.detail;if(!d)return"";if(d.winner)return"الفائز: "+d.winner+(d.players?" — "+d.players+" لاعب":"");if(d.players)return d.players+" لاعب";if(d.mode)return d.mode;return""};
+const det=r=>{const d=r.detail;if(!d)return"";if(d.winner)return"الفائز: "+d.winner+(d.players?" — "+d.players+" لاعب":"");if(d.players)return d.players+" لاعب"+(d.names?": "+d.names:"");if(d.mode)return d.mode;return""};
 function draw(){const q=document.getElementById("q").value.trim().toLowerCase(),k=document.getElementById("kind").value;
  const rows=all.filter(r=>(!k||r.kind===k)&&(!q||[r.name,r.room,r.ip,r.city,r.country,r.device].join(" ").toLowerCase().includes(q)));
  document.getElementById("rows").innerHTML=rows.slice(0,1500).map(r=>"<tr><td>"+t(r.at)+"</td><td><span class=k>"+e(K[r.kind]||r.kind)+"</span></td><td>"+e(r.name)+"</td><td>"+e(r.room)+"</td><td>"+e(r.ip)+"</td><td>"+e(r.city)+"</td><td>"+e(r.country)+"</td><td>"+e(r.device)+"</td><td>"+e(r.browser)+"</td><td>"+e(det(r))+"</td></tr>").join("")||"<tr><td colspan=10>لا توجد عمليات</td></tr>"}
-async function load(){const r=await fetch("/admin/data.json");const j=await r.json();all=j.rows||[];
+async function load(){const r=await fetch("/admin/data.json",{cache:"no-store"});if(!r.ok){document.getElementById("sub").textContent="تعذّر تحميل السجل ("+r.status+") — أعد فتح الصفحة";return}const j=await r.json();all=j.rows||[];
  document.getElementById("sub").textContent=(j.persistent?"السجل محفوظ بشكل دائم":"تنبيه: السجل مؤقت (Supabase غير مربوط)")+" — آخر تحديث "+t(Date.now());
  const visitors=new Set(all.filter(r=>r.ip).map(r=>r.ip+"|"+r.device)).size;
  const names=new Set(all.filter(r=>r.kind==="join"||(r.kind==="create"&&r.name)).map(r=>r.name)).size;
- const s=[["زيارات",all.filter(r=>r.kind==="visit").length],["أجهزة مختلفة",visitors],["لاعبون مختلفون",names],["غرف أُنشئت",all.filter(r=>r.kind==="create").length],["ألعاب بدأت",all.filter(r=>r.kind==="start").length],["ألعاب اكتملت",all.filter(r=>r.kind==="final").length]];
+ const s=[["زيارات",all.filter(r=>r.kind==="visit").length],["أجهزة مختلفة",visitors],["لاعبون مختلفون",names],["غرف أُنشئت",all.filter(r=>r.kind==="create").length],["مرات اللعب",all.filter(r=>r.kind==="start").length],["ألعاب اكتملت",all.filter(r=>r.kind==="final").length]];
  document.getElementById("stats").innerHTML=s.map(([a,b])=>"<div class=st><b>"+b+"</b><span>"+a+"</span></div>").join("");
  list("topNames",top(all.filter(r=>r.kind==="join"||r.kind==="create"),r=>r.name));
  list("topCities",top(all.filter(r=>r.kind==="visit"),r=>[r.city,r.country].filter(Boolean).join("، ")));
  list("topDevices",top(all.filter(r=>r.kind==="visit"),r=>r.device));
  draw()}
 const sel=document.getElementById("kind");Object.entries(K).forEach(([k,v])=>sel.add(new Option(v,k)));
-["q","kind"].forEach(id=>document.getElementById(id).addEventListener("input",draw));document.getElementById("reload").onclick=load;load();
+["q","kind"].forEach(id=>document.getElementById(id).addEventListener("input",draw));document.getElementById("reload").onclick=load;load();setInterval(load,20000);
 </script></body></html>`;
 
 module.exports = function attachLogger({ app, io, rooms }) {
@@ -200,7 +200,7 @@ module.exports = function attachLogger({ app, io, rooms }) {
     for (const room of rooms.values()) {
       const ph = room.phase, prev = room._logPhase;
       room._logPhase = ph;
-      if (prev === "lobby" && ph !== "lobby") record("start", null, { room: room.code, detail: { players: room.players.size } });
+      if (prev === "lobby" && ph !== "lobby") record("start", null, { room: room.code, detail: { players: room.players.size, names: [...room.players.values()].map(p => p.name).join("، ") } });
       if (ph === "final" && prev !== "final") {
         const st = (room.final && room.final.standings) || [];
         const top = st.length ? st[0].score : 0;
