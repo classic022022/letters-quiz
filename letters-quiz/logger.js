@@ -135,7 +135,7 @@ h2{font-size:17px;margin:20px 0 8px}.two{display:grid;grid-template-columns:repe
 const K=${JSON.stringify(KIND_AR)};let all=[];
 const e=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const t=d=>new Date(d).toLocaleString("ar-SA-u-nu-latn",{timeZone:"Asia/Riyadh",dateStyle:"short",timeStyle:"short"});
-const top=(arr,f,n=8)=>{const m={};arr.forEach(r=>{const k=f(r);if(k)m[k]=(m[k]||0)+1});return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,n)};
+const topN=(arr,f,n=8)=>{const m={};arr.forEach(r=>{const k=f(r);if(k)m[k]=(m[k]||0)+1});return Object.entries(m).sort((a,b)=>b[1]-a[1]).slice(0,n)};
 const list=(id,items)=>document.getElementById(id).innerHTML=items.length?items.map(([k,v])=>"<div><span>"+e(k)+"</span><b>"+v+"</b></div>").join(""):"<div><span>لا يوجد</span></div>";
 const det=r=>{const d=r.detail;if(!d)return"";if(d.winner)return"الفائز: "+d.winner+(d.players?" — "+d.players+" لاعب":"");if(d.players)return d.players+" لاعب"+(d.names?": "+d.names:"");if(d.mode)return d.mode;return""};
 function draw(){const q=document.getElementById("q").value.trim().toLowerCase(),k=document.getElementById("kind").value;
@@ -153,9 +153,9 @@ async function load(){if(!PW)return showLogin();const r=await fetch("/admin/data
  const names=new Set(all.filter(r=>r.kind==="join"||(r.kind==="create"&&r.name)).map(r=>r.name)).size;
  const s=[["زيارات",all.filter(r=>r.kind==="visit").length],["أجهزة مختلفة",visitors],["لاعبون مختلفون",names],["غرف أُنشئت",all.filter(r=>r.kind==="create").length],["مرات اللعب",all.filter(r=>r.kind==="start").length],["ألعاب اكتملت",all.filter(r=>r.kind==="final").length]];
  document.getElementById("stats").innerHTML=s.map(([a,b])=>"<div class=st><b>"+b+"</b><span>"+a+"</span></div>").join("");
- list("topNames",top(all.filter(r=>r.kind==="join"||r.kind==="create"),r=>r.name));
- list("topCities",top(all.filter(r=>r.kind==="visit"),r=>[r.city,r.country].filter(Boolean).join("، ")));
- list("topDevices",top(all.filter(r=>r.kind==="visit"),r=>r.device));
+ list("topNames",topN(all.filter(r=>r.kind==="join"||r.kind==="create"),r=>r.name));
+ list("topCities",topN(all.filter(r=>r.kind==="visit"),r=>[r.city,r.country].filter(Boolean).join("، ")));
+ list("topDevices",topN(all.filter(r=>r.kind==="visit"),r=>r.device));
  draw()}
 const sel=document.getElementById("kind");Object.entries(K).forEach(([k,v])=>sel.add(new Option(v,k)));
 ["q","kind"].forEach(id=>document.getElementById(id).addEventListener("input",draw));document.getElementById("reload").onclick=load;load();setInterval(load,20000);
