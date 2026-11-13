@@ -399,7 +399,7 @@ io.on("connection", socket => {
       case "settings": if (room.phase === "lobby") { room.settings = sanitizeSettings(arg, room.settings);
                          if (room.settings.mode !== "teams") room.players.forEach(p => { p.team = null; });
                          room.players.forEach(p => { if (p.team != null && !room.settings.teams[p.team]) p.team = null; }); } break;
-      case "start": if (room.phase === "lobby" && room.players.size >= (room.settings.hostPlays ? 2 : 1)) startGame(room); else return reply(cb, { ok: false, error: "تحتاج لاعباً واحداً على الأقل." }); break;
+      case "start": if (room.phase === "lobby" && room.players.size >= 2) startGame(room); else return reply(cb, { ok: false, error: "انتظر حتى يدخل لاعبان على الأقل — اللعبة تنافسية." }); break;
       case "pick": pickLetter(room, arg); break;
       case "close": if (room.phase === "question") closeQuestion(room, "host"); break;
       case "accept": if (room.phase === "question" || (room.phase === "reveal" && room.q && !room.q.winner)) {   // اعتماد إجابة رآها النظام خاطئة
