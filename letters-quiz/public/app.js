@@ -305,7 +305,7 @@ const lobbyView = {
     box.innerHTML = html;
     box.querySelectorAll("[data-team]").forEach(b => b.onclick = () => socket.emit("chooseTeam", +b.dataset.team));
     box.querySelectorAll("[data-kick]").forEach(b => b.onclick = () => { if (confirm("إخراج هذا اللاعب؟")) hostCmd("kick", b.dataset.kick); });
-    const sb = $("#b-start"); if (sb) sb.disabled = ps.length < (st.hostPlays ? 2 : 1);
+    const sb = $("#b-start"); if (sb) { const need = Math.max(0, 2 - ps.length); sb.disabled = need > 0; sb.textContent = need ? `بانتظار ${need === 2 ? "لاعبَين" : "لاعب آخر"} للبدء…` : `ابدأ اللعبة (${ps.length} لاعبين) ←`; }
   },
 };
 
