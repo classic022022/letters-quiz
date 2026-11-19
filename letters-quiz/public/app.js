@@ -155,7 +155,7 @@ function markPicked() { app.querySelectorAll(".tile").forEach(x => x.classList.t
 function render() {
   if (TV) return renderTV();
   if (!st) return renderOutside();
-  const key = [st.phase, st.role, st.letter, st.question && st.question.index, st.board.picked, st.tiebreak ? 1 : 0, st.settings.mode, st.settings.teams.length, st.settings.hostPlays].join("|");
+  const key = [st.phase, st.role, st.letter, st.question && st.question.index, st.board.picked, st.tiebreak ? 1 : 0, st.settings.mode, st.settings.teams.length, st.settings.hostPlays, st.settings.kids ? 1 : 0].join("|");
   const view = pickView();
   if (key !== built || !view.update) { built = key; view.build(); wireHeader(); }
   else view.update();
@@ -227,6 +227,8 @@ function settingsForm(s, lobby) {
       ${s.teams.length < 4 ? `<button class="btn small ghost" id="s-tadd">+ فريق</button>` : ""}
       ${s.local ? `<span class="hint">الفرق تتنافس من جهازك — تضغط على اسم الفريق اللي جاوب أول.</span>` : `<div class="seg" id="s-pick"><button data-v="choose" class="${s.teamPick === "choose" ? "on" : ""}">اللاعب يختار فريقه</button><button data-v="random" class="${s.teamPick === "random" ? "on" : ""}">توزيع عشوائي</button></div>`}
     </div>
+    <div><span class="f">مستوى الأسئلة</span><div class="seg" id="s-kids"><button data-v="0" class="${!s.kids ? "on" : ""}">👨‍👩‍👧 للجميع</button><button data-v="1" class="${s.kids ? "on" : ""}">🧒 وضع الأطفال</button></div>
+      ${s.kids ? `<span class="hint">أسئلة سهلة مختارة تناسب الأطفال (8–14 سنة)، ووقت أطول للإجابة.</span>` : ""}</div>
     <div class="grid2">
       <div><label class="f" for="s-rounds">عدد الحروف (الجولات)</label><select id="s-rounds">${[3, 5, 10, 15, 28].map(n => `<option value="${n}" ${+s.rounds === n ? "selected" : ""}>${n === 28 ? "كل الحروف" : n}</option>`).join("")}</select></div>
       <div><label class="f" for="s-per">أسئلة كل حرف</label><input id="s-per" type="number" min="1" max="35" value="${s.perLetter}"></div>
@@ -248,6 +250,8 @@ function wireForm(get, set, onChange) {
   const re = () => { set(readForm(get())); onChange(true); };
   app.querySelectorAll('input[name="hp"],input[name="lc"]').forEach(r => r.onchange = re);
   $("#s-mode").onclick = e => { const v = e.target.dataset.v; if (!v) return; const s = readForm(get()); s.mode = v; set(s); onChange(true); };
+  const kd = $("#s-kids"); if (kd) kd.onclick = e => { const v = e.target.closest("button"); if (!v) return; const s = readForm(get()); const on = v.dataset.v === "1"; if (on === !!s.kids) return;
+    s.kids = on; if (on && s.time > 0 && s.time < 40) s.time = 40; else if (!on && s.time === 40) s.time = 25; set(s); onChange(true); };
   const pk = $("#s-pick"); if (pk) pk.onclick = e => { const v = e.target.dataset.v; if (!v) return; const s = readForm(get()); s.teamPick = v; set(s); onChange(true); };
   const ad = $("#s-tadd"); if (ad) ad.onclick = () => { const s = readForm(get()); s.teams.push({ name: `فريق ${s.teams.length + 1}` }); set(s); onChange(true); };
   app.querySelectorAll("[data-trm]").forEach(b => b.onclick = () => { const s = readForm(get()); s.teams.splice(+b.dataset.trm, 1); set(s); onChange(true); });
