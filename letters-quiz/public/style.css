@@ -165,6 +165,8 @@ body.tv .wrap{max-width:none;min-height:100vh;display:flex;flex-direction:column
 
 .toast{position:fixed;bottom:calc(18px + env(safe-area-inset-bottom,0px));inset-inline:16px;margin:auto;max-width:420px;background:var(--ink);color:var(--paper);padding:12px 16px;border-radius:12px;font-weight:700;text-align:center;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none;z-index:20}
 .toast.show{opacity:1;transform:none}
+.net{position:fixed;top:0;inset-inline:0;z-index:30;background:var(--amber);color:#1B1300;font-weight:700;font-size:14px;line-height:1.5;text-align:center;padding:calc(8px + env(safe-area-inset-top,0px)) 16px 8px;box-shadow:var(--shadow)}
+.net[hidden]{display:none}
 .pop{animation:pop .35s ease-out}
 @keyframes pop{from{transform:scale(.85);opacity:.3}to{transform:none;opacity:1}}
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
