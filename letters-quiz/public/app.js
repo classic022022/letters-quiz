@@ -32,17 +32,40 @@ function beep(f, d = .12, type = "sine", v = .14) {
 
 /* ==================== الاتصال ==================== */
 const socket = io({ transports: ["websocket", "polling"] });
+
+/* شريط حالة الاتصال: يظهر إذا تأخر الاتصال أكثر من ثانية ونصف (مثلاً الخادم يستيقظ) */
+const net = document.createElement("div"); net.className = "net"; net.setAttribute("role", "status"); net.hidden = true; document.body.appendChild(net);
+let netT = null, netTick = null, netSince = 0, wasConnected = false;
+function netDown() {
+  if (netT || netTick) return;
+  netSince = Date.now();
+  netT = setTimeout(() => {
+    netT = null; net.hidden = false;
+    const up = () => { const s = Math.round((Date.now() - netSince) / 1000);
+      net.textContent = (wasConnected ? "⏳ انقطع الاتصال… جارٍ إعادة الاتصال" : "⏳ جارٍ الاتصال بالخادم…") + ` (${s} ث)`
+        + (s >= 8 ? " — قد يستغرق حتى دقيقة إذا كانت اللعبة غير مستخدمة منذ مدة. لا تُغلق الصفحة، ونتائج الغرفة محفوظة." : ""); };
+    up(); netTick = setInterval(up, 1000);
+  }, 1500);
+}
+function netUp() {
+  clearTimeout(netT); clearInterval(netTick); netT = netTick = null;
+  if (!net.hidden) { net.hidden = true; if (wasConnected) toast("✅ عاد الاتصال"); }
+  wasConnected = true;
+}
+netDown();
+socket.on("connect_error", netDown);
 const call = (ev, ...a) => new Promise(r => socket.emit(ev, ...a, r));
 const hostCmd = (cmd, arg) => call("host", { cmd, arg }).then(r => { if (r && !r.ok && r.error) toast(r.error); return r; });
 
 socket.on("connect", async () => {
+  netUp();
   if (TV && URL_ROOM) { const r = await call("join", { code: URL_ROOM, tv: true }); if (!r.ok) { st = null; ui = "tvmissing"; render(); } return; }
   if (sess && sess.code && (!URL_ROOM || URL_ROOM === sess.code)) {
     const r = await call("join", { code: sess.code, hostToken: sess.hostToken, playerToken: sess.playerToken });
     if (!r.ok) { toast("انتهت الغرفة السابقة."); leave(true); }
   }
 });
-socket.on("disconnect", () => { if (st) toast("انقطع الاتصال… جارٍ إعادة الاتصال", 3500); });
+socket.on("disconnect", netDown);
 socket.on("state", s => { offset = s.now - Date.now(); const prev = st; st = s; onChange(prev, s); render(); });
 socket.on("used", id => { usage[id] = (usage[id] || 0) + 1; store.set("lq-usage", usage); });
 socket.on("kicked", () => { toast("أخرجك المقدم من الغرفة."); leave(true); });
@@ -154,6 +177,7 @@ function renderOutside() {
       <input id="in-code" class="code-in" type="tel" inputmode="numeric" maxlength="4" placeholder="0000" autocomplete="off">
       <button class="btn block" id="b-go">انضمام</button>
     </div>
+    <p class="hint" style="text-align:center;margin:0">📩 وصلك رابط من صاحب الغرفة؟ افتحه مباشرة أو اكتب الرمز هنا — <b>شخص واحد فقط</b> ينشئ الغرفة والباقي ينضمون.</p>
   </div>`;
   wireHeader();
   $("#b-create").onclick = () => { ui = "create"; render(); };
