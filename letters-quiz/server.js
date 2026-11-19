@@ -8,6 +8,7 @@ const express = require("express");
 const http = require("http");
 const { Server } = require("socket.io");
 const QRCode = require("qrcode");
+const persist = require("./persist");
 
 /* ==================== بنك الأسئلة ==================== */
 const LETTERS = ["أ","ب","ت","ث","ج","ح","خ","د","ذ","ر","ز","س","ش","ص","ض","ط","ظ","ع","غ","ف","ق","ك","ل","م","ن","هـ","و","ي"];
@@ -97,7 +98,7 @@ function createRoom(settings, usage) {
     phase: "lobby", usedLetters: [], round: 0, letter: null, picked: null,
     queue: [], qi: 0, q: null, roundStart: {}, tiebreak: null, final: null, log: [], timers: new Set(),
   };
-  if (usage && typeof usage === "object") for (const [k, v] of Object.entries(usage)) { const n = parseInt(v, 10); if (n > 0) room.usage[k] = n; }
+  if (usage && typeof usage === "object") for (const [k, v] of Object.entries(usage).slice(0, 3000)) { const n = parseInt(v, 10); if (n > 0) room.usage[String(k).slice(0, 20)] = Math.min(n, 9999); }
   rooms.set(code, room);
   syncLocalTeams(room);
   return room;
@@ -326,10 +327,40 @@ function view(room, who) {
 }
 function broadcast(room) {
   room.lastActive = Date.now();
+  persist.save(room);                                                       // حفظ مؤجل حتى لا تضيع الغرفة لو أُعيد تشغيل الخادم
   const sockets = io.sockets.adapter.rooms.get("r" + room.code);
   if (!sockets) return;
   for (const sid of sockets) { const s = io.sockets.sockets.get(sid); if (s && s.data.code === room.code) s.emit("state", view(room, s.data)); }
 }
+
+/* استكمال غرفة محفوظة بعد إعادة تشغيل الخادم: الوقت يتوقف أثناء الانقطاع */
+function resume(room) {
+  const gap = Math.max(0, Date.now() - (room.savedAt || Date.now()));
+  delete room.savedAt;
+  room.lastActive = Date.now();
+  const q = room.q, hp = room.settings.hostPlays;
+  if (q) { q.startedAt += gap; if (q.deadline) q.deadline += gap; }
+  switch (room.phase) {
+    case "question": if (q && q.deadline && !q.timeUp && !q.closed) later(room, Math.max(500, q.deadline - Date.now() + 150), () => timeUp(room)); break;
+    case "board": if (room.picked) later(room, 2600, () => startLetter(room, room.picked)); else if (hp) later(room, 2500, () => pickLetter(room)); break;
+    case "reveal": if (room.tiebreak && q && q.winner) later(room, 3500, () => finish(room, true)); else if (hp) later(room, 5000, () => nextQuestion(room)); break;
+    case "round": case "tie": if (hp) later(room, 5000, () => toBoard(room)); break;
+  }
+}
+
+/* حدود بسيطة ضد العبث (لكل IP أو لكل اتصال) */
+const hits = new Map();
+function limited(key, max, windowMs) {
+  const now = Date.now(); let h = hits.get(key);
+  if (!h || h.reset < now) { h = { n: 0, reset: now + windowMs }; hits.set(key, h); }
+  return ++h.n > max;
+}
+function ipOf(socket) {
+  const hd = socket.handshake.headers;
+  const xf = hd["cf-connecting-ip"] || hd["true-client-ip"] || hd["x-forwarded-for"];
+  return (xf ? String(xf).split(",")[0] : socket.handshake.address || "").trim();
+}
+const MAX_ROOMS = 500;
 
 /* ==================== الخادم ==================== */
 const app = express();
@@ -356,8 +387,17 @@ function roomOf(socket) { return socket.data && rooms.get(socket.data.code); }
 io.on("connection", socket => {
   socket.data = {};
   const reply = (cb, x) => typeof cb === "function" && cb(x);
+  const ip = ipOf(socket);
+  let burst = 0, burstAt = Date.now();
+  socket.use((packet, next) => {                                            // أكثر من 30 رسالة في الثانية = عبث → قطع الاتصال
+    const now = Date.now(); if (now - burstAt > 1000) { burst = 0; burstAt = now; }
+    if (++burst > 30) return socket.disconnect(true);
+    next();
+  });
 
   socket.on("create", ({ settings, usage, hostName } = {}, cb) => {
+    if (limited("create|" + ip, 15, 10 * 60 * 1000)) return reply(cb, { ok: false, error: "أنشأت غرفاً كثيرة في وقت قصير. انتظر دقائق ثم حاول." });
+    if (rooms.size >= MAX_ROOMS) return reply(cb, { ok: false, error: "الخادم مشغول الآن. حاول بعد قليل." });
     const room = createRoom(settings, usage);
     room.hostSockets.add(socket.id);
     let pid = null, ptoken = null;
@@ -371,8 +411,10 @@ io.on("connection", socket => {
   });
 
   socket.on("join", ({ code, name, team, playerToken, hostToken, tv } = {}, cb) => {
+    if (limited("join|" + ip, 60, 60 * 1000)) return reply(cb, { ok: false, error: "محاولات كثيرة. انتظر دقيقة ثم حاول." });
     const room = rooms.get(String(code || "").trim());
-    if (!room) return reply(cb, { ok: false, error: "الغرفة غير موجودة. تأكد من الرمز." });
+    if (!room) { if (limited("miss|" + ip, 20, 10 * 60 * 1000)) return reply(cb, { ok: false, error: "محاولات كثيرة برموز خاطئة. انتظر قليلاً." });
+                 return reply(cb, { ok: false, error: "الغرفة غير موجودة. تأكد من الرمز." }); }
     if (tv) { attach(socket, room, { role: "tv" }); reply(cb, { ok: true }); return broadcast(room); }
     if (room.settings.local && !(hostToken && hostToken === room.hostToken)) return reply(cb, { ok: false, error: "هذه الغرفة تُلعب من جهاز المقدم فقط — لا يلزم الدخول من الجوال." });
     if (hostToken && hostToken === room.hostToken) {                       // عودة المقدم بعد انقطاع
@@ -467,9 +509,19 @@ io.on("connection", socket => {
 // تنظيف الغرف الخاملة (6 ساعات)
 setInterval(() => {
   const cutoff = Date.now() - 6 * 3600 * 1000;
-  for (const [code, r] of rooms) if (r.lastActive < cutoff) { clearTimers(r); rooms.delete(code); }
+  for (const [code, r] of rooms) if (r.lastActive < cutoff) { clearTimers(r); rooms.delete(code); persist.remove(code); }
+  const now = Date.now(); for (const [k, h] of hits) if (h.reset < now) hits.delete(k);
 }, 10 * 60 * 1000).unref();
 
 const PORT = process.env.PORT || 3000;
-if (require.main === module) server.listen(PORT, () => console.log(`مسابقة الحروف تعمل على المنفذ ${PORT} — ${Object.values(BANK_COUNTS).reduce((a, b) => a + b, 0)} سؤالاً`));
-module.exports = { server, io, rooms, normalize, isAccepted, pickQuestions };
+async function restoreRooms() {
+  const list = await persist.loadAll();
+  for (const room of list) { if (!room || !room.code || rooms.has(room.code)) continue; rooms.set(room.code, room); try { resume(room); } catch (e) { console.error("استكمال الغرفة", room.code, e.message); } }
+  if (list.length) console.log(`استُرجعت ${list.length} غرفة محفوظة`);
+}
+if (require.main === module) {
+  restoreRooms().finally(() => server.listen(PORT, () => console.log(`مسابقة الحروف تعمل على المنفذ ${PORT} — ${Object.values(BANK_COUNTS).reduce((a, b) => a + b, 0)} سؤالاً`)));
+  const stop = () => persist.flush(rooms).finally(() => process.exit(0));
+  process.on("SIGTERM", stop); process.on("SIGINT", stop);
+}
+module.exports = { server, io, rooms, normalize, isAccepted, pickQuestions, resume, restoreRooms, persist };
