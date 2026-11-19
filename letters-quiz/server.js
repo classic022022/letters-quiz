@@ -69,12 +69,13 @@ function newCode() { let c; do { c = String(crypto.randomInt(1000, 10000)); } wh
 
 function defaultSettings() {
   return { mode: "players", teams: [{ name: "الفريق الأول" }, { name: "الفريق الثاني" }], teamPick: "choose",
-           rounds: 5, perLetter: 10, time: 25, hostPlays: false };
+           rounds: 5, perLetter: 10, time: 25, hostPlays: false, local: false };
 }
 function sanitizeSettings(s, prev) {
   s = s || {}; const d = prev || defaultSettings();
   const teams = Array.isArray(s.teams) ? s.teams.slice(0, 4).map((t, i) => ({ name: clean(t && t.name, 20) || `فريق ${i + 1}` })) : d.teams;
-  const hostPlays = s.hostPlays != null ? !!s.hostPlays : d.hostPlays;
+  const local = s.local != null ? !!s.local : !!d.local;
+  const hostPlays = local ? false : (s.hostPlays != null ? !!s.hostPlays : d.hostPlays);
   let time = clamp(s.time, 0, 120, d.time);
   if (hostPlays && time < 10) time = 20;                 // الوضع التلقائي يحتاج مؤقتاً لإغلاق السؤال
   return {
@@ -83,7 +84,7 @@ function sanitizeSettings(s, prev) {
     teamPick: s.teamPick === "random" ? "random" : (s.teamPick === "choose" ? "choose" : d.teamPick),
     rounds: clamp(s.rounds, 1, 28, d.rounds),
     perLetter: clamp(s.perLetter, 1, 35, d.perLetter),
-    time, hostPlays,
+    time, hostPlays, local,
   };
 }
 
@@ -98,7 +99,23 @@ function createRoom(settings, usage) {
   };
   if (usage && typeof usage === "object") for (const [k, v] of Object.entries(usage)) { const n = parseInt(v, 10); if (n > 0) room.usage[k] = n; }
   rooms.set(code, room);
+  syncLocalTeams(room);
   return room;
+}
+/* وضع «من جهاز المقدم فقط»: في الفرق يُنشأ مقعد لكل فريق */
+function syncLocalTeams(room) {
+  const s = room.settings;
+  if (!s.local) return;
+  if (s.mode !== "teams") {                                              // فردي: احذف مقاعد الفرق
+    for (const [id, p] of room.players) if (p.seat) { room.players.delete(id); room.order = room.order.filter(x => x !== id); }
+    return;
+  }
+  for (const [id, p] of room.players) if (!p.seat || p.team >= s.teams.length) { room.players.delete(id); room.order = room.order.filter(x => x !== id); }
+  s.teams.forEach((t, i) => {
+    let p = [...room.players.values()].find(x => x.seat && x.team === i);
+    if (!p) { p = { id: token().slice(0, 8), token: token(), name: t.name, team: i, score: 0, sockets: new Set(), seat: true }; room.players.set(p.id, p); room.order.push(p.id); }
+    p.name = t.name;
+  });
 }
 function later(room, ms, fn) { const t = setTimeout(() => { room.timers.delete(t); fn(); }, ms); room.timers.add(t); return t; }
 function clearTimers(room) { room.timers.forEach(clearTimeout); room.timers.clear(); }
@@ -130,7 +147,7 @@ function canAnswer(room, p) {
 function availableLetters(room) { return LETTERS.filter(l => !room.usedLetters.includes(l) && BANK_COUNTS[l] > 0); }
 
 function startGame(room) {
-  if (room.settings.mode === "teams") {
+  if (room.settings.mode === "teams" && !room.settings.local) {
     const ps = [...room.players.values()];
     const nT = room.settings.teams.length;
     if (room.settings.teamPick === "random") shuffle(ps).forEach((p, i) => { p.team = i % nT; });
@@ -357,6 +374,7 @@ io.on("connection", socket => {
     const room = rooms.get(String(code || "").trim());
     if (!room) return reply(cb, { ok: false, error: "الغرفة غير موجودة. تأكد من الرمز." });
     if (tv) { attach(socket, room, { role: "tv" }); reply(cb, { ok: true }); return broadcast(room); }
+    if (room.settings.local && !(hostToken && hostToken === room.hostToken)) return reply(cb, { ok: false, error: "هذه الغرفة تُلعب من جهاز المقدم فقط — لا يلزم الدخول من الجوال." });
     if (hostToken && hostToken === room.hostToken) {                       // عودة المقدم بعد انقطاع
       room.hostSockets.add(socket.id);
       const hp = [...room.players.values()].find(p => p.isHostPlayer);
@@ -398,7 +416,18 @@ io.on("connection", socket => {
     switch (cmd) {
       case "settings": if (room.phase === "lobby") { room.settings = sanitizeSettings(arg, room.settings);
                          if (room.settings.mode !== "teams") room.players.forEach(p => { p.team = null; });
-                         room.players.forEach(p => { if (p.team != null && !room.settings.teams[p.team]) p.team = null; }); } break;
+                         room.players.forEach(p => { if (p.team != null && !room.settings.teams[p.team]) p.team = null; });
+                         syncLocalTeams(room); } break;
+      case "addLocal": { if (room.phase !== "lobby" || !room.settings.local || room.settings.mode === "teams") return reply(cb, { ok: false });
+                         const name = clean(arg); if (!name) return reply(cb, { ok: false, error: "اكتب الاسم." });
+                         if ([...room.players.values()].some(x => x.name === name)) return reply(cb, { ok: false, error: "الاسم موجود." });
+                         if (room.players.size >= 40) return reply(cb, { ok: false, error: "العدد مكتمل." });
+                         const p = { id: token().slice(0, 8), token: token(), name, team: null, score: 0, sockets: new Set(), local: true };
+                         room.players.set(p.id, p); room.order.push(p.id); } break;
+      case "give": { const p = room.players.get(arg);                      // المقدم يحدد من أجاب أولاً (وضع الجهاز الواحد)
+                     if (!room.settings.local || !p || room.phase !== "question" || !room.q || room.q.winner) return reply(cb, { ok: false });
+                     if (room.tiebreak && !room.tiebreak.among.includes(keyOf(room, p))) return reply(cb, { ok: false, error: "ليس ضمن كسر التعادل." });
+                     award(room, p, Date.now() - room.q.startedAt, "host-give"); } break;
       case "start": if (room.phase === "lobby" && room.players.size >= 2) startGame(room); else return reply(cb, { ok: false, error: "انتظر حتى يدخل لاعبان على الأقل — اللعبة تنافسية." }); break;
       case "pick": pickLetter(room, arg); break;
       case "close": if (room.phase === "question") closeQuestion(room, "host"); break;
