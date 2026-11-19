@@ -88,12 +88,29 @@ async function readAll() {
   return r.json();
 }
 
+// محاولات كلمة المرور الخاطئة: 8 لكل IP خلال 15 دقيقة ثم إيقاف مؤقت
+const failures = new Map();
+function reqIp(req) {
+  const xf = req.headers["cf-connecting-ip"] || req.headers["true-client-ip"] || req.headers["x-forwarded-for"];
+  return (xf ? String(xf).split(",")[0] : req.socket.remoteAddress || "").trim();
+}
+function sameSecret(a, b) {
+  const ha = require("crypto").createHash("sha256").update(String(a)).digest();
+  const hb = require("crypto").createHash("sha256").update(String(b)).digest();
+  return require("crypto").timingSafeEqual(ha, hb);
+}
 function auth(req, res, next) {
   const pass = process.env.ADMIN_PASSWORD;
   if (!pass) return res.status(503).type("text/plain; charset=utf-8").send("صفحة السجل غير مفعّلة: أضف ADMIN_PASSWORD في إعدادات Render.");
+  const ip = reqIp(req), now = Date.now();
+  let f = failures.get(ip); if (f && f.reset < now) { failures.delete(ip); f = null; }
+  if (f && f.n >= 8) return res.status(429).type("text/plain; charset=utf-8").send("محاولات خاطئة كثيرة. حاول بعد 15 دقيقة.");
   const h = req.headers.authorization || "";
-  const given = req.headers["x-admin-pass"] ? decodeURIComponent(String(req.headers["x-admin-pass"])) : h.startsWith("Basic ") ? Buffer.from(h.slice(6), "base64").toString().split(":").slice(1).join(":") : "";
-  if (given === pass) return next();
+  let given = "";
+  try { given = req.headers["x-admin-pass"] ? decodeURIComponent(String(req.headers["x-admin-pass"])) : h.startsWith("Basic ") ? Buffer.from(h.slice(6), "base64").toString().split(":").slice(1).join(":") : ""; } catch { given = ""; }
+  if (given && sameSecret(given, pass)) { failures.delete(ip); return next(); }
+  if (given) { if (!f) { f = { n: 0, reset: now + 15 * 60 * 1000 }; failures.set(ip, f); } f.n++; }
+  if (failures.size > 5000) failures.clear();
   res.status(401).type("text/plain; charset=utf-8").send("كلمة المرور مطلوبة.");
 }
 
@@ -147,7 +164,7 @@ function showLogin(msg){document.getElementById("app").hidden=true;document.getE
 document.getElementById("lf").onsubmit=ev=>{ev.preventDefault();PW=document.getElementById("pw").value;try{sessionStorage.setItem("lqpw",PW)}catch(_){}load()};
 document.getElementById("out").onclick=()=>{PW="";try{sessionStorage.removeItem("lqpw")}catch(_){}showLogin()};
 document.getElementById("dl").onclick=async()=>{const r=await fetch("/admin/export.csv",{headers:H(),cache:"no-store"});if(!r.ok)return showLogin("كلمة المرور غير صحيحة");const b=await r.blob();const a=document.createElement("a");a.href=URL.createObjectURL(b);a.download="letters-quiz-log.csv";a.click()};
-async function load(){if(!PW)return showLogin();const r=await fetch("/admin/data.json",{cache:"no-store",headers:H()});if(r.status===401)return showLogin("كلمة المرور غير صحيحة");if(!r.ok){document.getElementById("sub").textContent="تعذّر تحميل السجل ("+r.status+")";return}document.getElementById("login").hidden=true;document.getElementById("app").hidden=false;const j=await r.json();all=j.rows||[];
+async function load(){if(!PW)return showLogin();const r=await fetch("/admin/data.json",{cache:"no-store",headers:H()});if(r.status===401)return showLogin("كلمة المرور غير صحيحة");if(r.status===429)return showLogin("محاولات خاطئة كثيرة — انتظر 15 دقيقة");if(!r.ok){document.getElementById("sub").textContent="تعذّر تحميل السجل ("+r.status+")";return}document.getElementById("login").hidden=true;document.getElementById("app").hidden=false;const j=await r.json();all=j.rows||[];
  document.getElementById("sub").textContent=(j.persistent?"السجل محفوظ بشكل دائم":"تنبيه: السجل مؤقت (Supabase غير مربوط)")+" — آخر تحديث "+t(Date.now());
  const visitors=new Set(all.filter(r=>r.ip).map(r=>r.ip+"|"+r.device)).size;
  const names=new Set(all.filter(r=>r.kind==="join"||(r.kind==="create"&&r.name)).map(r=>r.name)).size;
