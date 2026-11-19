@@ -185,10 +185,14 @@ function renderJoin() {
   setTimeout(() => $("#in-name").focus(), 50);
 }
 
-let draft = store.get("lq-settings", { mode: "players", teams: [{ name: "الفريق الأول" }, { name: "الفريق الثاني" }], teamPick: "choose", rounds: 5, perLetter: 10, time: 25, hostPlays: false });
+let draft = store.get("lq-settings", { mode: "players", teams: [{ name: "الفريق الأول" }, { name: "الفريق الثاني" }], teamPick: "choose", rounds: 5, perLetter: 10, time: 25, hostPlays: false, local: false });
 function settingsForm(s, lobby) {
   return `<div class="stack">
-    ${lobby ? "" : `<div><span class="f">دورك في اللعبة</span><div class="choice">
+    ${lobby ? "" : `<div><span class="f">طريقة اللعب</span><div class="choice">
+      <label><input type="radio" name="lc" value="0" ${!s.local ? "checked" : ""}><span><b>📱 كل لاعب من جواله (عن بعد)</b><small>ترسل رابط الغرفة، وكل واحد يدخل ويجاوب من جواله. أسرع إجابة صحيحة تكسب.</small></span></label>
+      <label><input type="radio" name="lc" value="1" ${s.local ? "checked" : ""}><span><b>🖥️ من جهازي فقط وأعرض لهم</b><small>أنت تعرض السؤال على شاشتك أو التلفاز، وهم يجاوبون بصوتهم، وأنت تضغط على اسم أول من أجاب صح.</small></span></label>
+    </div></div>`}
+    ${lobby || s.local ? "" : `<div><span class="f">دورك في اللعبة</span><div class="choice">
       <label><input type="radio" name="hp" value="0" ${!s.hostPlays ? "checked" : ""}><span><b>🎙️ أنا المقدم فقط</b><small>أرى الإجابات، أختار الحروف، وأستطيع اعتماد إجابة كتبها لاعب بصيغة مختلفة.</small></span></label>
       <label><input type="radio" name="hp" value="1" ${s.hostPlays ? "checked" : ""}><span><b>🙋 ألعب معهم</b><small>بدون مقدم: الحروف تُختار والأسئلة تتقدم تلقائياً، ولا أحد يرى الإجابة قبل وقتها.</small></span></label>
     </div></div>
@@ -197,7 +201,7 @@ function settingsForm(s, lobby) {
     <div id="s-teams" class="stack" ${s.mode === "teams" ? "" : "hidden"}>
       <div class="stack" id="s-tnames">${s.teams.map((t, i) => `<div class="row" style="flex-wrap:nowrap"><span class="dot" style="background:${["#0F8B8D","#D9822B","#7A4FD1","#C23B5A"][i]};width:14px;height:14px"></span><input type="text" data-tn="${i}" maxlength="20" value="${esc(t.name)}">${i >= 2 ? `<button class="btn small ghost" data-trm="${i}">✕</button>` : ""}</div>`).join("")}</div>
       ${s.teams.length < 4 ? `<button class="btn small ghost" id="s-tadd">+ فريق</button>` : ""}
-      <div class="seg" id="s-pick"><button data-v="choose" class="${s.teamPick === "choose" ? "on" : ""}">اللاعب يختار فريقه</button><button data-v="random" class="${s.teamPick === "random" ? "on" : ""}">توزيع عشوائي</button></div>
+      ${s.local ? `<span class="hint">الفرق تتنافس من جهازك — تضغط على اسم الفريق اللي جاوب أول.</span>` : `<div class="seg" id="s-pick"><button data-v="choose" class="${s.teamPick === "choose" ? "on" : ""}">اللاعب يختار فريقه</button><button data-v="random" class="${s.teamPick === "random" ? "on" : ""}">توزيع عشوائي</button></div>`}
     </div>
     <div class="grid2">
       <div><label class="f" for="s-rounds">عدد الحروف (الجولات)</label><select id="s-rounds">${[3, 5, 10, 15, 28].map(n => `<option value="${n}" ${+s.rounds === n ? "selected" : ""}>${n === 28 ? "كل الحروف" : n}</option>`).join("")}</select></div>
@@ -209,14 +213,16 @@ function settingsForm(s, lobby) {
 }
 function readForm(base) {
   const s = JSON.parse(JSON.stringify(base));
+  const lc = app.querySelector('input[name="lc"]:checked'); if (lc) s.local = lc.value === "1";
   const hp = app.querySelector('input[name="hp"]:checked'); if (hp) s.hostPlays = hp.value === "1";
+  if (s.local) s.hostPlays = false;
   app.querySelectorAll("[data-tn]").forEach(i => { s.teams[+i.dataset.tn].name = i.value.trim() || `فريق ${+i.dataset.tn + 1}`; });
   s.rounds = +$("#s-rounds").value; s.perLetter = +$("#s-per").value || 10; s.time = Math.max(0, +$("#s-time").value || 0);
   return s;
 }
 function wireForm(get, set, onChange) {
   const re = () => { set(readForm(get())); onChange(true); };
-  app.querySelectorAll('input[name="hp"]').forEach(r => r.onchange = re);
+  app.querySelectorAll('input[name="hp"],input[name="lc"]').forEach(r => r.onchange = re);
   $("#s-mode").onclick = e => { const v = e.target.dataset.v; if (!v) return; const s = readForm(get()); s.mode = v; set(s); onChange(true); };
   const pk = $("#s-pick"); if (pk) pk.onclick = e => { const v = e.target.dataset.v; if (!v) return; const s = readForm(get()); s.teamPick = v; set(s); onChange(true); };
   const ad = $("#s-tadd"); if (ad) ad.onclick = () => { const s = readForm(get()); s.teams.push({ name: `فريق ${s.teams.length + 1}` }); set(s); onChange(true); };
@@ -258,25 +264,37 @@ function pickView() {
   return lobbyView;
 }
 
+function localCard() {
+  const teams = st.settings.mode === "teams";
+  return `<div class="card stack"><div><div class="eyebrow">🖥️ اللعب من جهازك</div><h3 style="margin:4px 0 0">${teams ? "الفرق جاهزة" : "أضف أسماء اللاعبين"}</h3>
+    <div class="hint">${teams ? "عدّل أسماء الفرق وعددها من الإعدادات تحت." : "اكتب اسم كل لاعب واضغط إضافة. يحتاج لاعبين على الأقل."} اعرض شاشتك عليهم، وإذا جاوب أحد صح اضغط على اسمه.</div></div>
+    ${teams ? "" : `<form class="ansbox" id="l-add" autocomplete="off"><input id="l-name" type="text" maxlength="20" placeholder="اسم اللاعب"><button class="btn primary">إضافة</button></form>`}
+    <details><summary class="hint" style="cursor:pointer">📺 عرضها على شاشة ثانية أو التلفاز (اختياري)</summary><p class="hint" style="margin:6px 0">افتح هذا الرابط في التلفاز ليظهر السؤال والنتائج، وتبقى الإجابة عندك فقط:</p>
+      <div class="row"><code style="direction:ltr;font-size:13px;word-break:break-all">${esc(tvURL(st.code))}</code><button class="btn small" id="b-tvl">نسخ</button></div></details></div>`;
+}
 const lobbyView = {
   build() {
     const host = st.isHost;
     app.innerHTML = `${header()}<div class="stack">
-      ${host ? `<div class="card stack">
+      ${host && st.settings.local ? localCard() : ""}
+      ${host && !st.settings.local ? `<div class="card stack">
         <div class="codebox"><div><div class="eyebrow">رمز الغرفة</div><div class="code">${st.code}</div><div class="hint">شارك الرابط، ومن يفتحه يكتب اسمه فقط.</div></div>
           <img class="qr" src="/qr.svg?t=${encodeURIComponent(joinURL(st.code))}" alt="رمز QR للانضمام"></div>
         <div class="grid2"><a class="btn wa" target="_blank" rel="noopener" href="https://wa.me/?text=${encodeURIComponent(`🔤 تعال العب «مسابقة الحروف»\nرمز الغرفة: ${st.code}\n${joinURL(st.code)}`)}">إرسال بالواتساب</a>
           <button class="btn" id="b-copy">نسخ الرابط</button></div>
         <details><summary class="hint" style="cursor:pointer">📺 عرضها على التلفاز</summary><p class="hint" style="margin:6px 0">افتح هذا الرابط في متصفح التلفاز أو أي جهاز متصل به — لا يحتاج تسجيل دخول:</p>
           <div class="row"><code style="direction:ltr;font-size:13px;word-break:break-all">${esc(tvURL(st.code))}</code><button class="btn small" id="b-tv">نسخ</button></div></details>
-      </div>
-      <div class="card stack"><div class="row between"><h3>الإعدادات</h3><span class="hint">تُحفظ تلقائياً</span></div><div id="form">${settingsForm(st.settings, true)}</div></div>` : ""}
+      </div>` : ""}
+      ${host ? `<div class="card stack"><div class="row between"><h3>الإعدادات</h3><span class="hint">تُحفظ تلقائياً</span></div><div id="form">${settingsForm(st.settings, true)}</div></div>` : ""}
       <div class="card stack" id="who"></div>
       ${host ? `<button class="btn primary block" id="b-start">ابدأ اللعبة ←</button>` : ""}
     </div>`;
     if (host) {
-      $("#b-copy").onclick = () => navigator.clipboard.writeText(joinURL(st.code)).then(() => toast("نُسخ الرابط"), () => toast(joinURL(st.code), 5000));
-      $("#b-tv").onclick = () => navigator.clipboard.writeText(tvURL(st.code)).then(() => toast("نُسخ رابط التلفاز"), () => {});
+      if ($("#l-add")) $("#l-add").onsubmit = async e => { e.preventDefault(); const i = $("#l-name"), v = i.value.trim(); if (!v) return;
+        const r = await call("host", { cmd: "addLocal", arg: v }); if (r && r.ok) { i.value = ""; i.focus(); } else toast((r && r.error) || "تعذّرت الإضافة"); };
+      if ($("#b-tvl")) $("#b-tvl").onclick = () => navigator.clipboard.writeText(tvURL(st.code)).then(() => toast("نُسخ رابط الشاشة"), () => toast(tvURL(st.code), 5000));
+      if ($("#b-copy")) $("#b-copy").onclick = () => navigator.clipboard.writeText(joinURL(st.code)).then(() => toast("نُسخ الرابط"), () => toast(joinURL(st.code), 5000));
+      if ($("#b-tv")) $("#b-tv").onclick = () => navigator.clipboard.writeText(tvURL(st.code)).then(() => toast("نُسخ رابط التلفاز"), () => {});
       let cur = st.settings;
       wireForm(() => cur, s => { cur = s; }, () => { store.set("lq-settings", { ...cur, hostPlays: st.settings.hostPlays }); hostCmd("settings", cur); });
       $("#b-start").onclick = () => hostCmd("start");
@@ -298,14 +316,14 @@ const lobbyView = {
         <div class="m">${ps.filter(p => p.team === i).map(p => esc(p.name)).join("، ") || "—"}</div></div>`).join("")}</div>`;
       const none = ps.filter(p => p.team == null); if (none.length) html += `<p class="hint" style="margin:0">لم يختاروا بعد: ${none.map(p => esc(p.name)).join("، ")}</p>`;
     } else {
-      html += ps.length ? `<div class="plist">${ps.map(p => `<div class="pl${p.online ? "" : " off"}"><span class="nm">${esc(p.name)}${me && p.id === me.id ? " (أنت)" : ""}</span>
+      html += ps.length ? `<div class="plist">${ps.map(p => `<div class="pl${p.online || st.settings.local ? "" : " off"}"><span class="nm">${esc(p.name)}${me && p.id === me.id ? " (أنت)" : ""}</span>
         ${st.isHost && !(me && p.id === me.id) ? `<button class="btn small ghost" data-kick="${p.id}" aria-label="إخراج">✕</button>` : ""}</div>`).join("")}</div>`
-        : `<p class="hint" style="margin:0">لم ينضم أحد بعد — أرسل الرابط.</p>`;
+        : `<p class="hint" style="margin:0">${st.settings.local ? "لم تُضف أحداً بعد." : "لم ينضم أحد بعد — أرسل الرابط."}</p>`;
     }
     box.innerHTML = html;
     box.querySelectorAll("[data-team]").forEach(b => b.onclick = () => socket.emit("chooseTeam", +b.dataset.team));
     box.querySelectorAll("[data-kick]").forEach(b => b.onclick = () => { if (confirm("إخراج هذا اللاعب؟")) hostCmd("kick", b.dataset.kick); });
-    const sb = $("#b-start"); if (sb) { const need = Math.max(0, 2 - ps.length); sb.disabled = need > 0; sb.textContent = need ? `بانتظار ${need === 2 ? "لاعبَين" : "لاعب آخر"} للبدء…` : `ابدأ اللعبة (${ps.length} لاعبين) ←`; }
+    const sb = $("#b-start"); if (sb) { const need = Math.max(0, 2 - ps.length); sb.disabled = need > 0; const lc = st.settings.local; sb.textContent = need ? (lc ? `أضف ${need === 2 ? "لاعبَين" : "لاعباً آخر"} للبدء` : `بانتظار ${need === 2 ? "لاعبَين" : "لاعب آخر"} للبدء…`) : `ابدأ اللعبة (${ps.length} ${lc && s.mode === "teams" ? "فرق" : "لاعبين"}) ←`; }
   },
 };
 
@@ -331,17 +349,22 @@ const boardView = {
 
 const questionView = {
   build() {
-    const q = st.question, host = hostControls();
-    app.innerHTML = `${header()}<div class="card stack">${qHead()}${timerHTML(q)}
+    const q = st.question, host = hostControls(), local = !!st.settings.local;
+    app.innerHTML = `${header()}<div class="card stack">${qHead(local ? "اعرض السؤال عليهم — الإجابة كلمة تبدأ بالحرف" : "")}${timerHTML(q)}
       <p class="qtext">${esc(q.text)}</p>
-      ${host ? `<div class="hostans"><div class="hint">🔒 الإجابة (لك فقط)</div><div class="a">${esc(q.answer)}</div>${q.alt && q.alt.length ? `<div class="hint">مقبول أيضاً: ${q.alt.map(esc).join("، ")}</div>` : ""}</div>` : ""}
+      ${host && local ? `<div class="hostans"><div class="row between"><div class="hint">🔒 الإجابة مخفية</div><button class="btn small" id="b-show">👁 إظهار الإجابة</button></div>
+        <div id="ans-box" hidden><div class="a">${esc(q.answer)}</div>${q.alt && q.alt.length ? `<div class="hint">مقبول أيضاً: ${q.alt.map(esc).join("، ")}</div>` : ""}</div></div>
+        <div><b>من جاوب صح أول؟</b><div class="grid2" style="margin-top:8px">${st.players.filter(p => !st.tiebreak || st.tiebreak.among.includes(st.settings.mode === "teams" ? "t" + p.team : p.id)).map(p => `<button class="btn primary" data-give="${p.id}">✔ ${esc(p.name)}</button>`).join("")}</div></div>`
+      : host ? `<div class="hostans"><div class="hint">🔒 الإجابة (لك فقط)</div><div class="a">${esc(q.answer)}</div>${q.alt && q.alt.length ? `<div class="hint">مقبول أيضاً: ${q.alt.map(esc).join("، ")}</div>` : ""}</div>` : ""}
       <div id="mine"></div>
-      <div><div class="row between" style="margin-bottom:6px"><b>الإجابات</b><span class="hint" id="cnt"></span></div><div id="feed"></div></div>
+      <div ${local ? "hidden" : ""}><div class="row between" style="margin-bottom:6px"><b>الإجابات</b><span class="hint" id="cnt"></span></div><div id="feed"></div></div>
     </div>
     <div class="card" style="margin-top:14px" id="sc"></div>
-    ${host ? `<div class="hostbar"><button class="btn bad" id="b-close">إغلاق السؤال</button><button class="btn" id="b-skip">إنهاء الحرف</button></div>` : ""}`;
+    ${host ? `<div class="hostbar"><button class="btn bad" id="b-close">${local ? "لا أحد جاوب ✖" : "إغلاق السؤال"}</button><button class="btn" id="b-skip">إنهاء الحرف</button></div>` : ""}`;
     if (host) {
       $("#b-close").onclick = () => hostCmd("close");
+      if ($("#b-show")) $("#b-show").onclick = () => { const b = $("#ans-box"); b.hidden = !b.hidden; $("#b-show").textContent = b.hidden ? "👁 إظهار الإجابة" : "🙈 إخفاء الإجابة"; };
+      app.querySelectorAll("[data-give]").forEach(b => b.onclick = () => { app.querySelectorAll("[data-give]").forEach(x => x.disabled = true); hostCmd("give", b.dataset.give); });
       $("#b-skip").onclick = () => { if (confirm("إنهاء أسئلة هذا الحرف والانتقال للنتيجة؟")) hostCmd("skipLetter"); };
     }
     mySent = null;
