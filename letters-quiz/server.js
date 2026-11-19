@@ -16,6 +16,12 @@ const sandbox = { window: {} };
 vm.runInNewContext(fs.readFileSync(path.join(__dirname, "questions.js"), "utf8"), sandbox);
 const BANK = sandbox.window.HARF_BANK;
 const BANK_COUNTS = Object.fromEntries(LETTERS.map(l => [l, (BANK[l] || []).length]));
+/* وضع الأطفال (8–14 سنة): الأسئلة السهلة فقط، مع استبعاد ما لا يناسب الصغار (مفاهيم مجردة أو معلومات صعبة) */
+const KIDS_EXCLUDE = new Set([108, 132, 167, 168, 170, 206, 212, 238, 240, 269, 286, 338, 339, 342, 346, 401, 409, 432, 446, 465, 490, 504,
+  511, 523, 545, 583, 584, 643, 668, 696, 697, 699, 752, 783, 796, 820, 836, 845, 866, 938, 974, 1011, 1108, 1119, 1209, 1217, 1218, 1228]);
+const KIDS_BANK = Object.fromEntries(LETTERS.map(l => [l, (BANK[l] || []).filter(q => q.level === "easy" && !KIDS_EXCLUDE.has(q.id))]));
+const KIDS_COUNTS = Object.fromEntries(LETTERS.map(l => [l, KIDS_BANK[l].length]));
+const bankFor = (room, l) => (room.settings.kids ? KIDS_BANK : BANK)[l] || [];
 const TEAM_COLORS = ["#0F8B8D", "#D9822B", "#7A4FD1", "#C23B5A"];
 
 /* قواعد المطابقة: تجاهل «الـ» والهمزات والتشكيل والتنوين، وة/ه، وى/ي */
@@ -47,7 +53,7 @@ const clamp = (v, lo, hi, d) => { v = parseInt(v, 10); return Number.isFinite(v)
 function pickQuestions(room, l, n) {
   const uses = id => room.usage[id] || 0;
   const by = {};
-  shuffle((BANK[l] || []).slice()).forEach(q => (by[uses(q.id)] ||= []).push(q));
+  shuffle(bankFor(room, l).slice()).forEach(q => (by[uses(q.id)] ||= []).push(q));
   const tiers = Object.keys(by).map(Number).sort((a, b) => a - b).map(k => by[k]);
   const want = { easy: Math.round(n * .4), mid: Math.round(n * .4) }; want.hard = n - want.easy - want.mid;
   const out = [];
@@ -70,7 +76,7 @@ function newCode() { let c; do { c = String(crypto.randomInt(1000, 10000)); } wh
 
 function defaultSettings() {
   return { mode: "players", teams: [{ name: "الفريق الأول" }, { name: "الفريق الثاني" }], teamPick: "choose",
-           rounds: 5, perLetter: 10, time: 25, hostPlays: false, local: false };
+           rounds: 5, perLetter: 10, time: 25, hostPlays: false, local: false, kids: false };
 }
 function sanitizeSettings(s, prev) {
   s = s || {}; const d = prev || defaultSettings();
@@ -86,6 +92,7 @@ function sanitizeSettings(s, prev) {
     rounds: clamp(s.rounds, 1, 28, d.rounds),
     perLetter: clamp(s.perLetter, 1, 35, d.perLetter),
     time, hostPlays, local,
+    kids: s.kids != null ? !!s.kids : !!d.kids,
   };
 }
 
@@ -184,7 +191,7 @@ function pickLetter(room, chosen) {
 function startLetter(room, l) {
   room.letter = l; room.usedLetters.push(l);
   if (!room.tiebreak) room.round++;
-  room.queue = room.tiebreak ? shuffle((BANK[l] || []).slice()).sort((a, b) => (room.usage[a.id] || 0) - (room.usage[b.id] || 0))
+  room.queue = room.tiebreak ? shuffle(bankFor(room, l).slice()).sort((a, b) => (room.usage[a.id] || 0) - (room.usage[b.id] || 0))
                              : pickQuestions(room, l, room.settings.perLetter);
   room.qi = 0;
   room.roundStart = Object.fromEntries(standings(room).map(s => [s.key, s.score]));
@@ -308,7 +315,7 @@ function view(room, who) {
     standings: standings(room),
     me: me ? { id: me.id, name: me.name, team: me.team, score: me.score, canAnswer: canAnswer(room, me),
                locked: q ? q.locked.has(me.id) : false, isHostPlayer: !!me.isHostPlayer } : null,
-    board: { used: room.usedLetters, picked: room.picked, counts: BANK_COUNTS },
+    board: { used: room.usedLetters, picked: room.picked, counts: room.settings.kids ? KIDS_COUNTS : BANK_COUNTS },
     round: room.round, rounds: room.settings.rounds, letter: room.letter,
     tiebreak: room.tiebreak,
     question: q ? {
