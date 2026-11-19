@@ -333,7 +333,7 @@ function broadcast(room) {
 
 /* ==================== الخادم ==================== */
 const app = express();
-app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h" }));
+app.use(express.static(path.join(__dirname, "public"), { maxAge: "1h", setHeaders: (res, p) => { if (p.endsWith(".html")) res.setHeader("Cache-Control", "no-cache"); } }));
 app.get("/qr.svg", async (req, res) => {
   try {
     const svg = await QRCode.toString(String(req.query.t || "").slice(0, 300), { type: "svg", margin: 1, color: { dark: "#14202E", light: "#FFFFFF" } });
